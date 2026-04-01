@@ -45,6 +45,159 @@ Install the project and dev dependencies:
 uv sync --group dev
 ```
 
+## GitHub Issues Quick Start
+
+Use this quick start if you want Symphony to manage the same repository with GitHub Issues as the tracker. This repository can manage itself with a committed `WORKFLOW.md`, and the committed workflow in this repo is already configured for GitHub Issues.
+
+### Prerequisites
+
+Make sure all of these are true before you start:
+
+- GitHub Issues are enabled for the repository
+- GitHub CLI `gh` is installed
+- `gh auth status` succeeds, or you have run `gh auth login`
+- Codex is installed and `codex app-server` is available on your path
+- Python 3.13 and `uv` are installed
+
+You can verify the local tools with:
+
+```bash
+gh auth status
+codex app-server --help
+uv --version
+python3.13 --version
+```
+
+### 1. Repo Setup
+
+Clone the repository, enter it, and install dependencies:
+
+```bash
+git clone <repo-url>
+cd <repo-name>
+uv sync --group dev
+```
+
+If your repository does not already commit a workflow file, create one from the example and then update it for GitHub Issues:
+
+```bash
+cp WORKFLOW.example.md WORKFLOW.md
+```
+
+This repository already includes a committed `WORKFLOW.md`, so you can usually confirm it matches the GitHub tracker configuration instead:
+
+```bash
+sed -n '1,40p' WORKFLOW.md
+```
+
+You should see the GitHub tracker settings used by this repo:
+
+```md
+tracker:
+  kind: github
+  labels: [agent]
+  exclude_labels: [blocked]
+  assignee: "@me"
+workspace:
+  root: ~/symphony
+codex:
+  command: codex app-server
+server:
+  port: 8080
+```
+
+### 2. GitHub Issue Setup
+
+Create or confirm the `agent` label that Symphony uses to find work:
+
+```bash
+gh label create agent --color 1d76db --description "Work picked up by Symphony"
+```
+
+If the label already exists, confirm it instead:
+
+```bash
+gh label list | rg '^agent\\s'
+```
+
+If you want a simple way to exclude issues from polling, create an optional `blocked` label:
+
+```bash
+gh label create blocked --color d73a4a --description "Excluded from Symphony polling"
+```
+
+Because the committed workflow uses `assignee: "@me"`, issues must be assigned to the current GitHub user before Symphony will pick them up. A good first test issue looks like this:
+
+- a small task
+- labeled `agent`
+- assigned to the current user
+
+You can create one with:
+
+```bash
+gh issue create --title "docs: test Symphony with GitHub issues" --body "Small README-only test task." --label agent --assignee @me
+```
+
+### 3. Workflow Setup
+
+Keep `WORKFLOW.md` in the repository root so the repository can manage itself. For a first run, the committed GitHub workflow in this repo is the right baseline:
+
+```md
+---
+tracker:
+  kind: github
+  labels: [agent]
+  exclude_labels: [blocked]
+  assignee: "@me"
+workspace:
+  root: ~/symphony
+polling:
+  interval_ms: 30000
+agent:
+  max_concurrent_agents: 1
+  max_turns: 8
+codex:
+  command: codex app-server
+server:
+  port: 8080
+---
+```
+
+Choose the workspace root carefully. `workspace.root` is where Symphony creates per-issue clones such as `~/symphony/<repo>/<issue>`. Change it in `WORKFLOW.md` if you want those workspaces somewhere else.
+
+### 4. Running Symphony
+
+Start Symphony from the repository root with the committed workflow:
+
+```bash
+uv run symphony ./WORKFLOW.md
+```
+
+The committed workflow serves the local dashboard on port `8080`, so open:
+
+```text
+http://127.0.0.1:8080
+```
+
+### 5. Verifying It Is Working
+
+After startup, verify the tracker and dashboard are behaving as expected:
+
+1. Confirm Symphony starts without `gh` or workflow configuration errors.
+2. Open `http://127.0.0.1:8080` and check that the dashboard loads.
+3. Confirm your test issue is small, labeled `agent`, and assigned to you.
+4. Make sure the issue does not have the `blocked` label if you use that exclusion.
+5. Watch for Symphony to create a per-issue workspace under your configured `workspace.root`.
+
+You can also verify the HTTP endpoints directly:
+
+```bash
+curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8080/api/v1/state
+```
+
+If Symphony does not pick up the issue, the most common cause is that one of these does not match `WORKFLOW.md`: the issue label, the assignee, or the workspace configuration.
+
 ## Configuration
 
 Symphony reads a single `WORKFLOW.md` file.
