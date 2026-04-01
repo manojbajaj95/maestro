@@ -21,7 +21,9 @@ async def _run(args: argparse.Namespace) -> int:
     bundle = build_service(config)
     if config.server.port is not None:
         server = uvicorn.Server(
-            uvicorn.Config(bundle.app, host=config.server.host, port=config.server.port, log_level="info")
+            uvicorn.Config(
+                bundle.app, host=config.server.host, port=config.server.port, log_level="info"
+            )
         )
         orchestrator_task = asyncio.create_task(bundle.orchestrator.run_forever())
         server_task = asyncio.create_task(server.serve())

@@ -26,7 +26,9 @@ class FakeStream:
 
 
 class FakeProcess:
-    def __init__(self, stdout: FakeStream, stderr: FakeStream, returncode: int | None = None) -> None:
+    def __init__(
+        self, stdout: FakeStream, stderr: FakeStream, returncode: int | None = None
+    ) -> None:
         self.stdout = stdout
         self.stderr = stderr
         self.stdin = None

@@ -12,7 +12,15 @@ from typing import Any, Protocol
 
 from .errors import AppServerError, TrackerError
 from .logging import log_event
-from .models import Issue, RateLimitSnapshot, RetryEntry, RunningEntry, RuntimeSnapshot, ServiceConfig, UsageTotals
+from .models import (
+    Issue,
+    RateLimitSnapshot,
+    RetryEntry,
+    RunningEntry,
+    RuntimeSnapshot,
+    ServiceConfig,
+    UsageTotals,
+)
 from .runner import WorkerOutcome
 from .tracker import TrackerClient
 
@@ -63,7 +71,9 @@ class WorkspaceController(Protocol):
 
 
 class RunnerProtocol(Protocol):
-    async def run_issue(self, issue: Issue, attempt: int, tool_handler: Any | None = None) -> WorkerOutcome: ...
+    async def run_issue(
+        self, issue: Issue, attempt: int, tool_handler: Any | None = None
+    ) -> WorkerOutcome: ...
 
 
 class SymphonyOrchestrator:
@@ -95,7 +105,9 @@ class SymphonyOrchestrator:
         while not self._stop.is_set():
             await self.tick()
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.config.polling.interval_ms / 1000)
+                await asyncio.wait_for(
+                    self._stop.wait(), timeout=self.config.polling.interval_ms / 1000
+                )
             except asyncio.TimeoutError:
                 continue
 
@@ -120,12 +132,20 @@ class SymphonyOrchestrator:
             state_name=issue.state.name,
             workspace_path=workspace,
         )
-        log_event(self.logger, "issue_dispatched", issue_id=issue.id, issue_identifier=issue.identifier, attempt=attempt)
+        log_event(
+            self.logger,
+            "issue_dispatched",
+            issue_id=issue.id,
+            issue_identifier=issue.identifier,
+            attempt=attempt,
+        )
         asyncio.create_task(self._run_worker(issue, attempt))
 
     async def _run_worker(self, issue: Issue, attempt: int) -> None:
         try:
-            outcome = await self.runner.run_issue(issue, attempt, tool_handler=self._handle_tool_call)
+            outcome = await self.runner.run_issue(
+                issue, attempt, tool_handler=self._handle_tool_call
+            )
         except (AppServerError, TrackerError, Exception) as exc:
             self._on_worker_exit(issue, attempt, normal=False, error=str(exc))
             return
@@ -182,7 +202,9 @@ class SymphonyOrchestrator:
             self.state.claimed.discard(issue_id)
             return
         if len(self.state.running) >= self.config.agent.max_concurrent_agents:
-            self._schedule_retry(issue, retry.attempt + 1, delay_ms=10_000, error="no_available_orchestrator_slots")
+            self._schedule_retry(
+                issue, retry.attempt + 1, delay_ms=10_000, error="no_available_orchestrator_slots"
+            )
             return
         await self.dispatch_issue(issue, attempt=retry.attempt)
 
@@ -217,7 +239,12 @@ class SymphonyOrchestrator:
             if issue.blocked_by:
                 continue
             eligible.append(issue)
-        eligible.sort(key=lambda item: (item.priority if item.priority is not None else 999_999, item.created_at))
+        eligible.sort(
+            key=lambda item: (
+                item.priority if item.priority is not None else 999_999,
+                item.created_at,
+            )
+        )
         return eligible
 
     def _apply_usage(self, usage, rate_limits: dict[str, int | None]) -> None:

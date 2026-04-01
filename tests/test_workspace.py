@@ -56,7 +56,9 @@ class FakeWorkspaceManager(WorkspaceManager):
 async def test_workspace_prepare_clones_repo_and_runs_setup(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True)
-    (repo_root / "WORKFLOW.md").write_text("---\ntracker:\n  kind: linear\n  api_key: token\n  project_slug: proj\nworkspace:\n  root: /tmp/x\n---\n")
+    (repo_root / "WORKFLOW.md").write_text(
+        "---\ntracker:\n  kind: linear\n  api_key: token\n  project_slug: proj\nworkspace:\n  root: /tmp/x\n---\n"
+    )
     manager = FakeWorkspaceManager(make_config(tmp_path))
 
     handle = await manager.prepare(make_issue())
@@ -70,7 +72,9 @@ async def test_workspace_prepare_clones_repo_and_runs_setup(tmp_path: Path) -> N
 async def test_workspace_prepare_reuses_existing_clone(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True)
-    (repo_root / "WORKFLOW.md").write_text("---\ntracker:\n  kind: linear\n  api_key: token\n  project_slug: proj\nworkspace:\n  root: /tmp/x\n---\n")
+    (repo_root / "WORKFLOW.md").write_text(
+        "---\ntracker:\n  kind: linear\n  api_key: token\n  project_slug: proj\nworkspace:\n  root: /tmp/x\n---\n"
+    )
     manager = FakeWorkspaceManager(make_config(tmp_path))
     existing = tmp_path / "symphony-home" / "maestro" / "abc-1"
     existing.mkdir(parents=True)
@@ -87,7 +91,9 @@ async def test_workspace_prepare_reuses_existing_clone(tmp_path: Path) -> None:
 async def test_workspace_cleanup_removes_directory(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True)
-    (repo_root / "WORKFLOW.md").write_text("---\ntracker:\n  kind: linear\n  api_key: token\n  project_slug: proj\nworkspace:\n  root: /tmp/x\n---\n")
+    (repo_root / "WORKFLOW.md").write_text(
+        "---\ntracker:\n  kind: linear\n  api_key: token\n  project_slug: proj\nworkspace:\n  root: /tmp/x\n---\n"
+    )
     manager = FakeWorkspaceManager(make_config(tmp_path))
     handle = await manager.prepare(make_issue())
     await manager.cleanup(handle)

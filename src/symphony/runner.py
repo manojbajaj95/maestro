@@ -49,11 +49,15 @@ class AgentRunner:
         workspace = await self.workspace_manager.prepare(issue)
         await self.workspace_manager.before_run(workspace)
         try:
-            prompt = render_prompt(self.config.prompt_template, issue.model_dump(mode="json"), attempt)
+            prompt = render_prompt(
+                self.config.prompt_template, issue.model_dump(mode="json"), attempt
+            )
             supported_tools = []
             if tool_handler is not None and self.config.tracker.kind == "linear":
                 supported_tools.append({"name": "linear_graphql"})
-            session = await self.app_server.start_session(workspace.path, supported_tools=supported_tools)
+            session = await self.app_server.start_session(
+                workspace.path, supported_tools=supported_tools
+            )
             result = await self.app_server.run_turns(
                 session,
                 prompt=prompt,

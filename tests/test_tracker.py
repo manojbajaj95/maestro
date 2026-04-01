@@ -37,7 +37,14 @@ async def test_fetch_candidate_issues_paginates_and_normalizes() -> None:
                                     "updatedAt": "2026-01-01T00:00:00Z",
                                     "state": {"name": "Todo"},
                                     "labels": {"nodes": [{"name": "Bug"}]},
-                                    "inverseRelations": {"nodes": [{"type": "blocks", "sourceIssue": {"identifier": "ABC-0"}}]},
+                                    "inverseRelations": {
+                                        "nodes": [
+                                            {
+                                                "type": "blocks",
+                                                "sourceIssue": {"identifier": "ABC-0"},
+                                            }
+                                        ]
+                                    },
                                 }
                             ],
                             "pageInfo": {"hasNextPage": True, "endCursor": "cursor-1"},

@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from symphony.errors import ConfigError, WorkflowError
-from symphony.workflow import build_service_config, load_workflow, render_prompt, resolve_runtime_path
+from symphony.workflow import (
+    build_service_config,
+    load_workflow,
+    render_prompt,
+    resolve_runtime_path,
+)
 
 
 def test_default_workflow_path_uses_cwd(tmp_path: Path) -> None:
@@ -41,7 +46,9 @@ Issue {{ issue.identifier }} attempt {{ attempt }}
     assert config.tracker.api_key == "token"
     assert str(config.workspace.root).endswith("symphony-workspaces")
     assert config.server.port == 8080
-    assert render_prompt(config.prompt_template, {"identifier": "ABC-1"}, 2) == "Issue ABC-1 attempt 2"
+    assert (
+        render_prompt(config.prompt_template, {"identifier": "ABC-1"}, 2) == "Issue ABC-1 attempt 2"
+    )
 
 
 def test_unknown_template_variable_fails() -> None:

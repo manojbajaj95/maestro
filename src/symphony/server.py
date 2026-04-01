@@ -22,14 +22,20 @@ def build_app(orchestrator: SymphonyOrchestrator) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def dashboard() -> str:
         snapshot = orchestrator.state.snapshot()
-        running = "".join(
-            f"<li>{entry.identifier} ({entry.state_name}) attempt {entry.attempt}</li>"
-            for entry in snapshot.running.values()
-        ) or "<li>No active runs</li>"
-        retries = "".join(
-            f"<li>{entry.identifier} retry {entry.attempt} due at {entry.due_at_ms}</li>"
-            for entry in snapshot.retry_attempts.values()
-        ) or "<li>No scheduled retries</li>"
+        running = (
+            "".join(
+                f"<li>{entry.identifier} ({entry.state_name}) attempt {entry.attempt}</li>"
+                for entry in snapshot.running.values()
+            )
+            or "<li>No active runs</li>"
+        )
+        retries = (
+            "".join(
+                f"<li>{entry.identifier} retry {entry.attempt} due at {entry.due_at_ms}</li>"
+                for entry in snapshot.retry_attempts.values()
+            )
+            or "<li>No scheduled retries</li>"
+        )
         return f"""
         <html>
           <head><title>Symphony Status</title></head>

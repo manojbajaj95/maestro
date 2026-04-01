@@ -46,7 +46,9 @@ class CodexAppServerClient:
     def __init__(self, config: CodexConfig) -> None:
         self.config = config
 
-    async def start_session(self, cwd: Path, supported_tools: list[dict[str, Any]] | None = None) -> AppServerSession:
+    async def start_session(
+        self, cwd: Path, supported_tools: list[dict[str, Any]] | None = None
+    ) -> AppServerSession:
         process = await asyncio.create_subprocess_exec(
             "bash",
             "-lc",
@@ -105,7 +107,9 @@ class CodexAppServerClient:
             event_type = event.type
             payload = event.payload
             if event_type == "session_started":
-                session.session_id = payload.get("session_id") or payload.get("sessionId") or session.session_id
+                session.session_id = (
+                    payload.get("session_id") or payload.get("sessionId") or session.session_id
+                )
             elif event_type == "thread/started":
                 thread = payload.get("thread") or {}
                 session.thread_id = thread.get("id") or session.thread_id
@@ -161,7 +165,9 @@ class CodexAppServerClient:
                 continue
             elif event.type == "error":
                 error = event.payload.get("error") or {}
-                raise AppServerError(error.get("message", event.payload.get("message", "app_server_error")))
+                raise AppServerError(
+                    error.get("message", event.payload.get("message", "app_server_error"))
+                )
             elif event.type == "session.ended":
                 raise AppServerError("thread_start_failed")
 
@@ -204,10 +210,14 @@ class CodexAppServerClient:
             if method:
                 return SessionEvent(type=method, payload=payload.get("params", {}))
             if payload.get("result", {}).get("sessionId"):
-                return SessionEvent(type="session_started", payload={"sessionId": payload["result"]["sessionId"]})
+                return SessionEvent(
+                    type="session_started", payload={"sessionId": payload["result"]["sessionId"]}
+                )
             return SessionEvent(type="message", payload=payload)
 
-    async def _handle_tool_call(self, payload: dict[str, Any], tool_handler: Any | None) -> dict[str, Any]:
+    async def _handle_tool_call(
+        self, payload: dict[str, Any], tool_handler: Any | None
+    ) -> dict[str, Any]:
         name = payload.get("name")
         if tool_handler is None:
             return {"success": False, "error": "unsupported_tool_call"}

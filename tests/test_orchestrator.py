@@ -54,7 +54,14 @@ class FakeRunner:
         raise RuntimeError("boom")
 
 
-def make_issue(issue_id: str, identifier: str, *, priority: int, created_at: datetime, blockers: list[str] | None = None) -> Issue:
+def make_issue(
+    issue_id: str,
+    identifier: str,
+    *,
+    priority: int,
+    created_at: datetime,
+    blockers: list[str] | None = None,
+) -> Issue:
     return Issue(
         id=issue_id,
         identifier=identifier,
@@ -124,7 +131,9 @@ def test_retry_backoff_caps(tmp_path: Path) -> None:
         cast(RunnerProtocol, FakeRunner()),
         logger=__import__("logging").getLogger("test"),
     )
-    orchestrator._schedule_retry(issue, attempt=10, delay_ms=min(10_000 * (2 ** 8), 60_000), error="boom")
+    orchestrator._schedule_retry(
+        issue, attempt=10, delay_ms=min(10_000 * (2**8), 60_000), error="boom"
+    )
     retry = orchestrator.state.retry_attempts["1"]
     assert isinstance(retry, RetryEntry)
     assert retry.attempt == 10

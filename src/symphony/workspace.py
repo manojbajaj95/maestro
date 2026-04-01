@@ -129,7 +129,9 @@ class WorkspaceManager:
             return
         proc = await asyncio.create_subprocess_shell(hook, cwd=str(cwd))
         try:
-            await asyncio.wait_for(proc.wait(), timeout=self.config.workspace.hooks.timeout_ms / 1000)
+            await asyncio.wait_for(
+                proc.wait(), timeout=self.config.workspace.hooks.timeout_ms / 1000
+            )
         except asyncio.TimeoutError as exc:
             proc.kill()
             await proc.wait()

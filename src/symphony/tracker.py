@@ -29,7 +29,9 @@ class TrackerClient(Protocol):
 
     async def fetch_issue_states_by_ids(self, issue_ids: list[str]) -> list[Issue]: ...
 
-    async def execute_raw_query(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]: ...
+    async def execute_raw_query(
+        self, query: str, variables: dict[str, Any] | None = None
+    ) -> dict[str, Any]: ...
 
 
 def _normalize_linear_issue(node: dict[str, Any]) -> Issue:
@@ -200,7 +202,9 @@ class LinearTrackerClient:
         raw = data.get("issues", {})
         return [_normalize_linear_issue(node) for node in raw.get("nodes", [])]
 
-    async def execute_raw_query(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def execute_raw_query(
+        self, query: str, variables: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         text = query.strip()
         if not text:
             raise TrackerError("invalid_graphql_query")
@@ -283,7 +287,11 @@ class GitHubTrackerClient:
                 str(self.config.page_size),
             ]
         )
-        return [issue for issue in (_normalize_github_issue(item) for item in json.loads(output)) if issue.state.name in wanted]
+        return [
+            issue
+            for issue in (_normalize_github_issue(item) for item in json.loads(output))
+            if issue.state.name in wanted
+        ]
 
     async def fetch_issue_states_by_ids(self, issue_ids: list[str]) -> list[Issue]:
         issues: list[Issue] = []
@@ -300,7 +308,9 @@ class GitHubTrackerClient:
             issues.append(_normalize_github_issue(json.loads(output)))
         return issues
 
-    async def execute_raw_query(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def execute_raw_query(
+        self, query: str, variables: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         raise TrackerError("github_raw_query_not_supported")
 
 
