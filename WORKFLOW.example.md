@@ -3,12 +3,12 @@ tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
   project_slug: your-project
-  active_states:
-    - Todo
-    - In Progress
-  terminal_states:
-    - Done
-    - Canceled
+  states:
+    to_do: Todo
+    in_progress: In Progress
+    in_review: In Review
+    done: Done
+    blocked: Blocked
 workspace:
   root: ~/symphony
 polling:
@@ -35,9 +35,12 @@ GitHub tracker example:
 ---
 tracker:
   kind: github
-  labels: [agent]
-  exclude_labels: [blocked]
   assignee: "@me"
+  states:
+    to_do: status:todo
+    in_progress: status:in-progress
+    in_review: status:in-review
+    blocked: status:blocked
 workspace:
   root: ~/symphony
 polling:

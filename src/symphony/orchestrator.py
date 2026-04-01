@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -23,10 +22,6 @@ from .models import (
 )
 from .runner import WorkerOutcome
 from .tracker import TrackerClient
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 @dataclass(slots=True)
@@ -94,7 +89,7 @@ class SymphonyOrchestrator:
         self._stop = asyncio.Event()
 
     async def startup_cleanup(self) -> None:
-        terminal = await self.tracker.fetch_issues_by_states(self.config.tracker.terminal_states)
+        terminal = await self.tracker.fetch_issues_by_states(["done"])
         for issue in terminal:
             with suppress(Exception):
                 handle = await self.workspace_manager.prepare(issue)
@@ -122,14 +117,15 @@ class SymphonyOrchestrator:
     async def dispatch_issue(self, issue: Issue, attempt: int) -> None:
         if issue.id in self.state.claimed:
             return
+        claimed_issue = await self.tracker.move_to_in_progress(issue)
         self.state.claimed.add(issue.id)
-        workspace = self.workspace_manager.workspace_path_for_issue(issue)
+        workspace = self.workspace_manager.workspace_path_for_issue(claimed_issue)
         self.state.running[issue.id] = RunningEntry(
             issue_id=issue.id,
-            identifier=issue.identifier,
+            identifier=claimed_issue.identifier,
             attempt=attempt,
             started_at=datetime.now(timezone.utc),
-            state_name=issue.state.name,
+            state_name=claimed_issue.state.name,
             workspace_path=workspace,
         )
         log_event(
@@ -139,33 +135,31 @@ class SymphonyOrchestrator:
             issue_identifier=issue.identifier,
             attempt=attempt,
         )
-        asyncio.create_task(self._run_worker(issue, attempt))
+        asyncio.create_task(self._run_worker(claimed_issue, attempt))
 
     async def _run_worker(self, issue: Issue, attempt: int) -> None:
         try:
             outcome = await self.runner.run_issue(
                 issue, attempt, tool_handler=self._handle_tool_call
             )
+            self._apply_usage(outcome.result.usage, outcome.result.rate_limits.model_dump())
+            review_issue = await self.tracker.move_to_in_review(outcome.issue)
         except (AppServerError, TrackerError, Exception) as exc:
+            await self._move_issue_back_to_to_do(issue, error=str(exc))
             self._on_worker_exit(issue, attempt, normal=False, error=str(exc))
             return
-        self._apply_usage(outcome.result.usage, outcome.result.rate_limits.model_dump())
-        current_state = outcome.issue.state.name
-        terminal_names = {name.lower() for name in self.config.tracker.terminal_states}
         self._on_worker_exit(issue, attempt, normal=True, error=None)
-        if current_state.lower() in terminal_names:
+        done_name = (self.config.tracker.states.done or "").lower()
+        if review_issue.state.name.lower() == done_name:
             with suppress(Exception):
-                handle = await self.workspace_manager.prepare(outcome.issue)
+                handle = await self.workspace_manager.prepare(review_issue)
                 await self.workspace_manager.cleanup(handle)
 
     def _on_worker_exit(self, issue: Issue, attempt: int, normal: bool, error: str | None) -> None:
         self.state.running.pop(issue.id, None)
+        self.state.claimed.discard(issue.id)
         if normal:
             self.state.completed.add(issue.id)
-            self._schedule_retry(issue, 1, delay_ms=1_000, error=None)
-        else:
-            delay = min(10_000 * (2 ** max(attempt - 1, 0)), self.config.agent.max_retry_backoff_ms)
-            self._schedule_retry(issue, attempt + 1, delay_ms=delay, error=error)
         log_event(
             self.logger,
             "worker_exit",
@@ -175,66 +169,35 @@ class SymphonyOrchestrator:
             error=error,
         )
 
-    def _schedule_retry(self, issue: Issue, attempt: int, delay_ms: int, error: str | None) -> None:
-        due_at = _now_ms() + delay_ms
-        self.state.retry_attempts[issue.id] = RetryEntry(
-            issue_id=issue.id,
-            identifier=issue.identifier,
-            attempt=attempt,
-            due_at_ms=due_at,
-            error=error,
-        )
-        with suppress(RuntimeError):
-            asyncio.get_running_loop().create_task(self._wait_and_retry(issue.id))
-
-    async def _wait_and_retry(self, issue_id: str) -> None:
-        entry = self.state.retry_attempts.get(issue_id)
-        if entry is None:
-            return
-        delay = max(entry.due_at_ms - _now_ms(), 0) / 1000
-        await asyncio.sleep(delay)
-        retry = self.state.retry_attempts.pop(issue_id, None)
-        if retry is None:
-            return
-        issues = await self.tracker.fetch_candidate_issues()
-        issue = next((item for item in issues if item.id == issue_id), None)
-        if issue is None:
-            self.state.claimed.discard(issue_id)
-            return
-        if len(self.state.running) >= self.config.agent.max_concurrent_agents:
-            self._schedule_retry(
-                issue, retry.attempt + 1, delay_ms=10_000, error="no_available_orchestrator_slots"
-            )
-            return
-        await self.dispatch_issue(issue, attempt=retry.attempt)
+    async def _move_issue_back_to_to_do(self, issue: Issue, error: str) -> None:
+        try:
+            await self.tracker.move_to_to_do(issue)
+        except Exception as exc:  # noqa: BLE001
+            self.state.errors.append(f"{issue.identifier}:{error}:rollback_failed:{exc}")
 
     async def _reconcile_running(self) -> None:
         if not self.state.running:
             return
         refreshed = await self.tracker.fetch_issue_states_by_ids(list(self.state.running))
         by_id = {issue.id: issue for issue in refreshed}
-        active = {state.lower() for state in self.config.tracker.active_states}
-        terminal = {state.lower() for state in self.config.tracker.terminal_states}
         for issue_id, entry in list(self.state.running.items()):
             issue = by_id.get(issue_id)
             if issue is None:
                 continue
-            state_name = issue.state.name.lower()
-            self.state.running[issue_id].state_name = issue.state.name
-            if state_name not in active:
+            canonical = await self.tracker.read_canonical_state(issue)
+            self.state.running[issue_id].state_name = canonical
+            if canonical != "in_progress":
                 self.state.running.pop(issue_id, None)
-                if state_name in terminal:
+                self.state.claimed.discard(issue_id)
+                if canonical == "done":
                     with suppress(Exception):
                         handle = await self.workspace_manager.prepare(issue)
                         await self.workspace_manager.cleanup(handle)
 
     def _eligible(self, issues: Iterable[Issue]) -> list[Issue]:
-        active = {state.lower() for state in self.config.tracker.active_states}
         eligible: list[Issue] = []
         for issue in issues:
             if issue.id in self.state.claimed:
-                continue
-            if issue.state.name.lower() not in active:
                 continue
             if issue.blocked_by:
                 continue

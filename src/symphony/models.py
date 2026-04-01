@@ -50,29 +50,40 @@ class PollingConfig(BaseModel):
 
 
 class TrackerConfig(BaseModel):
+    class StatesConfig(BaseModel):
+        to_do: str | None = None
+        in_progress: str | None = None
+        in_review: str | None = None
+        done: str | None = None
+        blocked: str | None = None
+
     kind: Literal["linear", "github"]
     endpoint: str = "https://api.linear.app/graphql"
     api_key: str | None = None
     project_slug: str | None = None
-    labels: list[str] = Field(default_factory=list)
-    exclude_labels: list[str] = Field(default_factory=list)
     assignee: str | None = None
-    active_states: list[str] = Field(default_factory=list)
-    terminal_states: list[str] = Field(default_factory=list)
+    states: StatesConfig = Field(default_factory=StatesConfig)
     page_size: int = 50
     timeout_ms: int = 30_000
 
     @model_validator(mode="after")
     def apply_kind_defaults(self) -> "TrackerConfig":
-        if not self.active_states:
-            self.active_states = ["open"] if self.kind == "github" else ["Todo", "In Progress"]
-        if not self.terminal_states:
-            self.terminal_states = ["closed"] if self.kind == "github" else ["Done", "Canceled"]
         if self.kind == "linear":
             if not self.api_key:
                 raise ValueError("linear_api_key_required")
             if not self.project_slug:
                 raise ValueError("linear_project_slug_required")
+            self.states.to_do = self.states.to_do or "Todo"
+            self.states.in_progress = self.states.in_progress or "In Progress"
+            self.states.in_review = self.states.in_review or "In Review"
+            self.states.done = self.states.done or "Done"
+            self.states.blocked = self.states.blocked or "Blocked"
+        else:
+            self.states.to_do = self.states.to_do or "status:todo"
+            self.states.in_progress = self.states.in_progress or "status:in-progress"
+            self.states.in_review = self.states.in_review or "status:in-review"
+            self.states.done = self.states.done or "closed"
+            self.states.blocked = self.states.blocked or "status:blocked"
         return self
 
 

@@ -1,9 +1,12 @@
 ---
 tracker:
   kind: github
-  labels: [agent]
-  exclude_labels: [blocked]
   assignee: "@me"
+  states:
+    to_do: status:todo
+    in_progress: status:in-progress
+    in_review: status:in-review
+    blocked: status:blocked
 workspace:
   root: ~/symphony
 polling:

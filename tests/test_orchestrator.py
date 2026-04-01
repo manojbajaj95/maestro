@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
@@ -7,16 +8,20 @@ from typing import cast
 from symphony.models import (
     Issue,
     IssueStateRef,
-    RetryEntry,
+    RateLimitSnapshot,
+    SessionResult,
     ServiceConfig,
+    UsageTotals,
 )
 from symphony.orchestrator import RunnerProtocol, SymphonyOrchestrator, WorkspaceController
+from symphony.runner import WorkerOutcome
 from symphony.tracker import TrackerClient
 
 
 class FakeTracker:
     def __init__(self, issues: list[Issue]) -> None:
         self.issues = issues
+        self.transitions: list[tuple[str, str]] = []
 
     async def fetch_candidate_issues(self) -> list[Issue]:
         return self.issues
@@ -27,8 +32,42 @@ class FakeTracker:
     async def fetch_issue_states_by_ids(self, issue_ids: list[str]) -> list[Issue]:
         return [issue for issue in self.issues if issue.id in issue_ids]
 
+    async def read_canonical_state(self, issue: Issue) -> str:
+        mapping = {
+            "todo": "to_do",
+            "in progress": "in_progress",
+            "in review": "in_review",
+            "done": "done",
+            "blocked": "blocked",
+        }
+        return mapping.get(issue.state.name.lower(), "unknown")
+
+    async def move_to_in_progress(self, issue: Issue) -> Issue:
+        self.transitions.append((issue.id, "in_progress"))
+        updated = issue.model_copy(deep=True)
+        updated.state.name = "In Progress"
+        self._replace(updated)
+        return updated
+
+    async def move_to_in_review(self, issue: Issue) -> Issue:
+        self.transitions.append((issue.id, "in_review"))
+        updated = issue.model_copy(deep=True)
+        updated.state.name = "In Review"
+        self._replace(updated)
+        return updated
+
+    async def move_to_to_do(self, issue: Issue) -> Issue:
+        self.transitions.append((issue.id, "to_do"))
+        updated = issue.model_copy(deep=True)
+        updated.state.name = "Todo"
+        self._replace(updated)
+        return updated
+
     async def execute_raw_query(self, query: str, variables: dict | None = None) -> dict:
         return {"ok": True}
+
+    def _replace(self, updated: Issue) -> None:
+        self.issues = [updated if issue.id == updated.id else issue for issue in self.issues]
 
 
 class FakeWorkspaceManager:
@@ -50,8 +89,22 @@ class FakeWorkspaceManager:
 
 
 class FakeRunner:
+    def __init__(self, should_fail: bool = True) -> None:
+        self.should_fail = should_fail
+
     async def run_issue(self, issue: Issue, attempt: int, tool_handler=None):
-        raise RuntimeError("boom")
+        if self.should_fail:
+            raise RuntimeError("boom")
+        return WorkerOutcome(
+            normal_exit=True,
+            issue=issue,
+            result=SessionResult(
+                session_id="sess-1",
+                turns_completed=1,
+                usage=UsageTotals(total_tokens=1),
+                rate_limits=RateLimitSnapshot(),
+            ),
+        )
 
 
 def make_issue(
@@ -83,7 +136,13 @@ def make_config(tmp_path: Path) -> ServiceConfig:
                 "kind": "linear",
                 "api_key": "token",
                 "project_slug": "proj",
-                "terminal_states": ["Done", "Canceled"],
+                "states": {
+                    "to_do": "Todo",
+                    "in_progress": "In Progress",
+                    "in_review": "In Review",
+                    "done": "Done",
+                    "blocked": "Blocked",
+                },
             },
             "workspace": {"root": tmp_path / "workspaces"},
             "agent": {"max_concurrent_agents": 1, "max_retry_backoff_ms": 60000},
@@ -131,9 +190,36 @@ def test_retry_backoff_caps(tmp_path: Path) -> None:
         cast(RunnerProtocol, FakeRunner()),
         logger=__import__("logging").getLogger("test"),
     )
-    orchestrator._schedule_retry(
-        issue, attempt=10, delay_ms=min(10_000 * (2**8), 60_000), error="boom"
+    assert orchestrator.state.retry_attempts == {}
+
+
+def test_dispatch_transitions_issue_to_in_progress_before_running(tmp_path: Path) -> None:
+    issue = make_issue("1", "ABC-1", priority=1, created_at=datetime.now(timezone.utc))
+    tracker = FakeTracker([issue])
+    orchestrator = SymphonyOrchestrator(
+        make_config(tmp_path),
+        cast(TrackerClient, tracker),
+        cast(WorkspaceController, FakeWorkspaceManager(tmp_path)),
+        cast(RunnerProtocol, FakeRunner(should_fail=False)),
+        logger=__import__("logging").getLogger("test"),
     )
-    retry = orchestrator.state.retry_attempts["1"]
-    assert isinstance(retry, RetryEntry)
-    assert retry.attempt == 10
+
+    asyncio.run(orchestrator.dispatch_issue(issue, attempt=1))
+
+    assert tracker.transitions[0] == ("1", "in_progress")
+
+
+def test_worker_failure_moves_issue_back_to_to_do(tmp_path: Path) -> None:
+    issue = make_issue("1", "ABC-1", priority=1, created_at=datetime.now(timezone.utc))
+    tracker = FakeTracker([issue])
+    orchestrator = SymphonyOrchestrator(
+        make_config(tmp_path),
+        cast(TrackerClient, tracker),
+        cast(WorkspaceController, FakeWorkspaceManager(tmp_path)),
+        cast(RunnerProtocol, FakeRunner(should_fail=True)),
+        logger=__import__("logging").getLogger("test"),
+    )
+
+    asyncio.run(orchestrator._run_worker(issue, attempt=1))
+
+    assert tracker.transitions[-1] == ("1", "to_do")

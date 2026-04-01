@@ -81,9 +81,12 @@ def test_github_tracker_config_is_supported(tmp_path: Path) -> None:
         """---
 tracker:
   kind: github
-  labels: [agent]
-  exclude_labels: [blocked]
   assignee: "@me"
+  states:
+    to_do: status:todo
+    in_progress: status:in-progress
+    in_review: status:in-review
+    blocked: status:blocked
 workspace:
   root: /tmp/symphony
 ---
@@ -92,5 +95,5 @@ Prompt
     )
     config = build_service_config(load_workflow(workflow))
     assert config.tracker.kind == "github"
-    assert config.tracker.labels == ["agent"]
-    assert config.tracker.terminal_states == ["closed"]
+    assert config.tracker.states.to_do == "status:todo"
+    assert config.tracker.states.done == "closed"

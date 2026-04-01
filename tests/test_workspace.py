@@ -87,10 +87,9 @@ async def test_workspace_prepare_clones_repo_and_runs_setup(tmp_path: Path) -> N
     assert handle.created is True
     assert handle.path == tmp_path / "symphony-home" / "maestro" / "abc-1"
     assert [call[0] for call in manager.calls] == ["clone", "cmd", "branch", "uv-sync"]
-    assert (
-        "git remote set-url origin git@github.com:manojbajaj95/maestro.git"
-        in [call[1] for call in manager.calls]
-    )
+    assert "git remote set-url origin git@github.com:manojbajaj95/maestro.git" in [
+        call[1] for call in manager.calls
+    ]
 
 
 @pytest.mark.asyncio

@@ -95,9 +95,12 @@ You should see the GitHub tracker settings used by this repo:
 ```md
 tracker:
   kind: github
-  labels: [agent]
-  exclude_labels: [blocked]
   assignee: "@me"
+  states:
+    to_do: status:todo
+    in_progress: status:in-progress
+    in_review: status:in-review
+    blocked: status:blocked
 workspace:
   root: ~/symphony
 codex:
@@ -108,34 +111,31 @@ server:
 
 ### 2. GitHub Issue Setup
 
-Create or confirm the `agent` label that Symphony uses to find work:
+Create or confirm the workflow labels that Symphony uses to move issues through the state machine:
 
 ```bash
-gh label create agent --color 1d76db --description "Work picked up by Symphony"
+gh label create status:todo --color 1d76db --description "Ready for Symphony pickup"
+gh label create status:in-progress --color fbca04 --description "Claimed by Symphony"
+gh label create status:in-review --color 5319e7 --description "Waiting for human review"
+gh label create status:blocked --color d73a4a --description "Excluded from Symphony polling"
 ```
 
-If the label already exists, confirm it instead:
+If the labels already exist, confirm them instead:
 
 ```bash
-gh label list | rg '^agent\\s'
-```
-
-If you want a simple way to exclude issues from polling, create an optional `blocked` label:
-
-```bash
-gh label create blocked --color d73a4a --description "Excluded from Symphony polling"
+gh label list | rg '^status:'
 ```
 
 Because the committed workflow uses `assignee: "@me"`, issues must be assigned to the current GitHub user before Symphony will pick them up. A good first test issue looks like this:
 
 - a small task
-- labeled `agent`
+- labeled `status:todo`
 - assigned to the current user
 
 You can create one with:
 
 ```bash
-gh issue create --title "docs: test Symphony with GitHub issues" --body "Small README-only test task." --label agent --assignee @me
+gh issue create --title "docs: test Symphony with GitHub issues" --body "Small README-only test task." --label status:todo --assignee @me
 ```
 
 ### 3. Workflow Setup
@@ -146,9 +146,12 @@ Keep `WORKFLOW.md` in the repository root so the repository can manage itself. F
 ---
 tracker:
   kind: github
-  labels: [agent]
-  exclude_labels: [blocked]
   assignee: "@me"
+  states:
+    to_do: status:todo
+    in_progress: status:in-progress
+    in_review: status:in-review
+    blocked: status:blocked
 workspace:
   root: ~/symphony
 polling:
@@ -185,8 +188,8 @@ After startup, verify the tracker and dashboard are behaving as expected:
 
 1. Confirm Symphony starts without `gh` or workflow configuration errors.
 2. Open `http://127.0.0.1:8080` and check that the dashboard loads.
-3. Confirm your test issue is small, labeled `agent`, and assigned to you.
-4. Make sure the issue does not have the `blocked` label if you use that exclusion.
+3. Confirm your test issue is small, labeled `status:todo`, and assigned to you.
+4. Make sure the issue does not carry `status:blocked`.
 5. Watch for Symphony to create a per-issue workspace under your configured `workspace.root`.
 
 You can also verify the HTTP endpoints directly:
@@ -196,7 +199,7 @@ curl http://127.0.0.1:8080/healthz
 curl http://127.0.0.1:8080/api/v1/state
 ```
 
-If Symphony does not pick up the issue, the most common cause is that one of these does not match `WORKFLOW.md`: the issue label, the assignee, or the workspace configuration.
+If Symphony does not pick up the issue, the most common cause is that one of these does not match `WORKFLOW.md`: the workflow-state label, the assignee, or the workspace configuration.
 
 ## Configuration
 
@@ -221,12 +224,12 @@ tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
   project_slug: your-project
-  active_states:
-    - Todo
-    - In Progress
-  terminal_states:
-    - Done
-    - Canceled
+  states:
+    to_do: Todo
+    in_progress: In Progress
+    in_review: In Review
+    done: Done
+    blocked: Blocked
 workspace:
   root: ~/symphony
 polling:
@@ -250,9 +253,12 @@ Attempt number: {{ attempt }}
 ---
 tracker:
   kind: github
-  labels: [agent]
-  exclude_labels: [blocked]
   assignee: "@me"
+  states:
+    to_do: status:todo
+    in_progress: status:in-progress
+    in_review: status:in-review
+    blocked: status:blocked
 workspace:
   root: ~/symphony
 polling:
@@ -267,7 +273,7 @@ server:
 ---
 Work on issue {{ issue.identifier }}: {{ issue.title }}
 
-Current description:
+Issue details:
 {{ issue.description }}
 ```
 
@@ -321,14 +327,17 @@ The dashboard is intentionally simple and server-rendered.
 
 ### Linear
 
-- polls configured active states in the configured project
+- polls issues in the configured `to_do` state for the configured project
+- moves issues between configured Linear workflow states
 - refreshes issue state by Linear issue id
 - exposes the optional `linear_graphql` tool to Codex sessions
 
 ### GitHub
 
 - polls issues via `gh issue list`
-- filters by labels, excluded labels, and assignee
+- treats workflow state as labels on open issues
+- only picks issues labeled with the configured `to_do` state and assigned correctly
+- moves issues through `to_do -> in_progress -> in_review`
 - refreshes issue state via `gh issue view`
 - does not expose `linear_graphql`
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -29,12 +29,20 @@ class TrackerClient(Protocol):
 
     async def fetch_issue_states_by_ids(self, issue_ids: list[str]) -> list[Issue]: ...
 
+    async def read_canonical_state(self, issue: Issue) -> str: ...
+
+    async def move_to_in_progress(self, issue: Issue) -> Issue: ...
+
+    async def move_to_in_review(self, issue: Issue) -> Issue: ...
+
+    async def move_to_to_do(self, issue: Issue) -> Issue: ...
+
     async def execute_raw_query(
         self, query: str, variables: dict[str, Any] | None = None
     ) -> dict[str, Any]: ...
 
 
-def _normalize_linear_issue(node: dict[str, Any]) -> Issue:
+def _normalize_linear_issue(node: Mapping[str, Any]) -> Issue:
     labels = [item.get("name", "") for item in node.get("labels", {}).get("nodes", [])]
     blocked_by: list[str] = []
     for relation in node.get("inverseRelations", {}).get("nodes", []):
@@ -45,15 +53,15 @@ def _normalize_linear_issue(node: dict[str, Any]) -> Issue:
         priority = None
     state_node = node.get("state") or {}
     return Issue(
-        id=node["id"],
-        identifier=node["identifier"],
-        title=node.get("title") or "",
+        id=str(node["id"]),
+        identifier=str(node["identifier"]),
+        title=str(node.get("title") or ""),
         url=node.get("url"),
         description=node.get("description"),
         priority=priority,
         state=IssueStateRef(
             id=state_node.get("id"),
-            name=state_node.get("name") or "",
+            name=str(state_node.get("name") or ""),
             type=state_node.get("type"),
         ),
         labels=labels,
@@ -66,6 +74,7 @@ def _normalize_linear_issue(node: dict[str, Any]) -> Issue:
 class LinearTrackerClient:
     def __init__(self, config: TrackerConfig, http_client: httpx.AsyncClient | None = None) -> None:
         self.config = config
+        self._state_id_cache: dict[str, str] | None = None
         self._client = http_client or httpx.AsyncClient(
             timeout=self.config.timeout_ms / 1000,
             headers={"Authorization": self.config.api_key or ""},
@@ -118,7 +127,7 @@ class LinearTrackerClient:
         """
         variables = {
             "projectSlug": self.config.project_slug,
-            "states": self.config.active_states,
+            "states": [self.config.states.to_do],
             "first": self.config.page_size,
             "after": None,
         }
@@ -140,6 +149,14 @@ class LinearTrackerClient:
     async def fetch_issues_by_states(self, state_names: list[str]) -> list[Issue]:
         if not state_names:
             return []
+        canonical = {
+            "to_do": self.config.states.to_do,
+            "in_progress": self.config.states.in_progress,
+            "in_review": self.config.states.in_review,
+            "done": self.config.states.done,
+            "blocked": self.config.states.blocked,
+        }
+        resolved = [canonical.get(name, name) for name in state_names]
         query = """
         query IssuesByState($projectSlug: String!, $states: [String!], $first: Int!) {
           issues(
@@ -169,7 +186,7 @@ class LinearTrackerClient:
             query,
             {
                 "projectSlug": self.config.project_slug,
-                "states": state_names,
+                "states": resolved,
                 "first": self.config.page_size,
             },
         )
@@ -202,6 +219,91 @@ class LinearTrackerClient:
         raw = data.get("issues", {})
         return [_normalize_linear_issue(node) for node in raw.get("nodes", [])]
 
+    async def read_canonical_state(self, issue: Issue) -> str:
+        state_name = issue.state.name.lower()
+        mapping = {
+            (self.config.states.to_do or "").lower(): "to_do",
+            (self.config.states.in_progress or "").lower(): "in_progress",
+            (self.config.states.in_review or "").lower(): "in_review",
+            (self.config.states.done or "").lower(): "done",
+            (self.config.states.blocked or "").lower(): "blocked",
+        }
+        return mapping.get(state_name, "unknown")
+
+    async def move_to_in_progress(self, issue: Issue) -> Issue:
+        return await self._move_issue_to_state(issue, self.config.states.in_progress or "")
+
+    async def move_to_in_review(self, issue: Issue) -> Issue:
+        return await self._move_issue_to_state(issue, self.config.states.in_review or "")
+
+    async def move_to_to_do(self, issue: Issue) -> Issue:
+        return await self._move_issue_to_state(issue, self.config.states.to_do or "")
+
+    async def _move_issue_to_state(self, issue: Issue, state_name: str) -> Issue:
+        if not state_name:
+            raise TrackerError("linear_missing_target_state")
+        state_id = await self._state_id_for_name(state_name)
+        mutation = """
+        mutation UpdateIssueState($id: String!, $stateId: String!) {
+          issueUpdate(id: $id, input: { stateId: $stateId }) {
+            success
+            issue {
+              id
+              identifier
+              title
+              url
+              description
+              priority
+              createdAt
+              updatedAt
+              state { id name type }
+              labels { nodes { name } }
+              inverseRelations { nodes { type sourceIssue { identifier } } }
+            }
+          }
+        }
+        """
+        data = await self._execute(mutation, {"id": issue.id, "stateId": state_id})
+        result = data.get("issueUpdate") or {}
+        if not result.get("success"):
+            raise TrackerError("linear_issue_update_failed")
+        node = result.get("issue")
+        if not isinstance(node, Mapping):
+            raise TrackerError("linear_unknown_payload")
+        return _normalize_linear_issue(node)
+
+    async def _state_id_for_name(self, state_name: str) -> str:
+        if self._state_id_cache is None:
+            query = """
+            query ProjectStates($projectSlug: String!) {
+              projects(filter: { slugId: { eq: $projectSlug } }, first: 1) {
+                nodes {
+                  team {
+                    states {
+                      nodes { id name }
+                    }
+                  }
+                }
+              }
+            }
+            """
+            data = await self._execute(query, {"projectSlug": self.config.project_slug})
+            projects = data.get("projects") or {}
+            nodes = projects.get("nodes") or []
+            team = nodes[0].get("team") if nodes else None
+            states = (team or {}).get("states") or {}
+            cache: dict[str, str] = {}
+            for node in states.get("nodes", []):
+                name = str(node.get("name") or "").lower()
+                state_id = str(node.get("id") or "")
+                if name and state_id:
+                    cache[name] = state_id
+            self._state_id_cache = cache
+        state_id = self._state_id_cache.get(state_name.lower()) if self._state_id_cache else None
+        if not state_id:
+            raise TrackerError(f"linear_unknown_state:{state_name}")
+        return state_id
+
     async def execute_raw_query(
         self, query: str, variables: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -226,16 +328,16 @@ async def run_gh(args: Sequence[str]) -> str:
     return stdout.decode()
 
 
-def _normalize_github_issue(raw: dict[str, Any]) -> Issue:
+def _normalize_github_issue(raw: Mapping[str, Any]) -> Issue:
     labels = [item.get("name", "").lower() for item in raw.get("labels", [])]
     return Issue(
         id=str(raw["number"]),
         identifier=f"#{raw['number']}",
-        title=raw.get("title") or "",
+        title=str(raw.get("title") or ""),
         url=raw.get("url"),
-        description=raw.get("body") or "",
+        description=str(raw.get("body") or ""),
         priority=None,
-        state=IssueStateRef(name=(raw.get("state") or "").lower()),
+        state=IssueStateRef(name=str(raw.get("state") or "").lower()),
         labels=labels,
         blocked_by=[],
         created_at=_parse_datetime(raw.get("createdAt")),
@@ -259,17 +361,15 @@ class GitHubTrackerClient:
             "--limit",
             str(self.config.page_size),
         ]
-        for label in self.config.labels:
-            args.extend(["--label", label])
+        if self.config.states.to_do:
+            args.extend(["--label", self.config.states.to_do])
         if self.config.assignee:
             args.extend(["--assignee", self.config.assignee])
         output = await self._runner(args)
         issues = [_normalize_github_issue(item) for item in json.loads(output)]
-        if self.config.exclude_labels:
-            excluded = {label.lower() for label in self.config.exclude_labels}
-            issues = [issue for issue in issues if not excluded.intersection(issue.labels)]
-        issues.sort(key=lambda item: item.created_at)
-        return issues
+        eligible = [issue for issue in issues if await self.read_canonical_state(issue) == "to_do"]
+        eligible.sort(key=lambda item: item.created_at)
+        return eligible
 
     async def fetch_issues_by_states(self, state_names: list[str]) -> list[Issue]:
         if not state_names:
@@ -287,26 +387,83 @@ class GitHubTrackerClient:
                 str(self.config.page_size),
             ]
         )
-        return [
-            issue
-            for issue in (_normalize_github_issue(item) for item in json.loads(output))
-            if issue.state.name in wanted
-        ]
+        matched: list[Issue] = []
+        for item in json.loads(output):
+            issue = _normalize_github_issue(item)
+            if await self.read_canonical_state(issue) in wanted:
+                matched.append(issue)
+        return matched
 
     async def fetch_issue_states_by_ids(self, issue_ids: list[str]) -> list[Issue]:
         issues: list[Issue] = []
         for issue_id in issue_ids:
-            output = await self._runner(
-                [
-                    "issue",
-                    "view",
-                    str(issue_id),
-                    "--json",
-                    "number,title,state,labels,body,url,createdAt,updatedAt",
-                ]
-            )
-            issues.append(_normalize_github_issue(json.loads(output)))
+            issues.append(await self._fetch_issue(issue_id))
         return issues
+
+    async def read_canonical_state(self, issue: Issue) -> str:
+        if issue.state.name == "closed":
+            return "done"
+        labels = {label.lower() for label in issue.labels}
+        mapping = {
+            (self.config.states.to_do or "").lower(): "to_do",
+            (self.config.states.in_progress or "").lower(): "in_progress",
+            (self.config.states.in_review or "").lower(): "in_review",
+            (self.config.states.blocked or "").lower(): "blocked",
+        }
+        matches = [canonical for label, canonical in mapping.items() if label and label in labels]
+        if len(matches) > 1:
+            raise TrackerError("github_multiple_workflow_labels")
+        if matches:
+            return matches[0]
+        return "unknown"
+
+    async def move_to_in_progress(self, issue: Issue) -> Issue:
+        return await self._move_issue_to_label(issue.id, self.config.states.in_progress or "")
+
+    async def move_to_in_review(self, issue: Issue) -> Issue:
+        return await self._move_issue_to_label(issue.id, self.config.states.in_review or "")
+
+    async def move_to_to_do(self, issue: Issue) -> Issue:
+        return await self._move_issue_to_label(issue.id, self.config.states.to_do or "")
+
+    async def _fetch_issue(self, issue_id: str) -> Issue:
+        output = await self._runner(
+            [
+                "issue",
+                "view",
+                str(issue_id),
+                "--json",
+                "number,title,state,labels,body,url,createdAt,updatedAt",
+            ]
+        )
+        return _normalize_github_issue(json.loads(output))
+
+    async def _move_issue_to_label(self, issue_id: str, target: str) -> Issue:
+        if not target:
+            raise TrackerError("github_missing_target_label")
+        issue = await self._fetch_issue(issue_id)
+        current_state = await self.read_canonical_state(issue)
+        if current_state == "done":
+            raise TrackerError("github_issue_already_closed")
+        workflow_labels = {
+            label.lower()
+            for label in [
+                self.config.states.to_do,
+                self.config.states.in_progress,
+                self.config.states.in_review,
+                self.config.states.blocked,
+            ]
+            if label
+        }
+        current_labels = {
+            label.lower() for label in issue.labels if label.lower() in workflow_labels
+        }
+        args = ["issue", "edit", str(issue_id), "--add-label", target]
+        remove = sorted(current_labels - {target.lower()})
+        if remove:
+            args.extend(["--remove-label", ",".join(remove)])
+        await self._runner(args)
+        return await self._fetch_issue(issue_id)
 
     async def execute_raw_query(
         self, query: str, variables: dict[str, Any] | None = None
