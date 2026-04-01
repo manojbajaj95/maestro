@@ -1,6 +1,6 @@
 # Symphony Agent Guide
 
-This repository implements Symphony: a local orchestration service that watches tracker issues, prepares an isolated workspace per issue, runs Codex in app-server mode, and then publishes the result back through git and the tracker workflow.
+This repository implements Symphony as a Python 3.14 `uv`-managed orchestration tool.
 
 The repo is intentionally small and operational. Most bugs here are not isolated logic bugs. They are lifecycle bugs: issue state, workspace state, app-server state, git state, or tracker state getting out of sync. Agents working in this repo should think in terms of end-to-end flows, not single functions.
 

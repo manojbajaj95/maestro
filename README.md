@@ -1,6 +1,6 @@
 # Symphony
 
-Symphony is a Python 3.13 orchestration service for polling Linear or GitHub issues, cloning the repository into per-issue workspaces, running Codex in app-server mode, and exposing lightweight runtime observability.
+Symphony is a Python 3.14 orchestration service for polling Linear or GitHub issues, cloning the repository into per-issue workspaces, running Codex in app-server mode, and exposing lightweight runtime observability.
 
 ## What It Does
 
@@ -27,7 +27,7 @@ This repository uses `uv` for everything:
 
 ## Requirements
 
-- Python 3.13
+- Python 3.14
 - `uv`
 - Codex with `codex app-server` available on your path
 - for Linear:
@@ -57,7 +57,7 @@ Make sure all of these are true before you start:
 - GitHub CLI `gh` is installed
 - `gh auth status` succeeds, or you have run `gh auth login`
 - Codex is installed and `codex app-server` is available on your path
-- Python 3.13 and `uv` are installed
+- Python 3.14 and `uv` are installed
 
 You can verify the local tools with:
 
@@ -65,7 +65,7 @@ You can verify the local tools with:
 gh auth status
 codex app-server --help
 uv --version
-python3.13 --version
+python3.14 --version
 ```
 
 ### 1. Repo Setup
