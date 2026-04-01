@@ -1,0 +1,27 @@
+---
+tracker:
+  kind: github
+  labels: [agent]
+  exclude_labels: [blocked]
+  assignee: "@me"
+workspace:
+  root: ./.symphony-workspaces
+polling:
+  interval_ms: 30000
+agent:
+  max_concurrent_agents: 1
+  max_turns: 8
+codex:
+  command: codex app-server
+server:
+  port: 8080
+---
+Work on issue {{ issue.identifier }}: {{ issue.title }}
+
+Issue details:
+{{ issue.description }}
+
+Repository conventions:
+- Follow AGENTS.md
+- Keep changes focused to the issue
+- Run relevant checks before finishing

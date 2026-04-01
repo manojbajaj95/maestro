@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Symphony runtime workspaces
+.symphony-workspaces/
+
+# Local runtime output
+symphony.log
