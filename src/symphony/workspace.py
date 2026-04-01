@@ -24,6 +24,7 @@ class WorkspaceManager:
     def __init__(self, config: ServiceConfig) -> None:
         self.config = config
         self.source_repo_root = self.config.workflow_path.parent.resolve()
+        self.source_remote_url = self._discover_source_remote_url()
         self.project_name = self._discover_project_name()
         base_root = self.config.workspace.root.expanduser().resolve()
         self.root = base_root / self.project_name
@@ -66,7 +67,7 @@ class WorkspaceManager:
         if workspace.path.exists():
             shutil.rmtree(workspace.path, ignore_errors=True)
 
-    def _discover_project_name(self) -> str:
+    def _discover_source_remote_url(self) -> str | None:
         try:
             result = subprocess.run(
                 ["git", "config", "--get", "remote.origin.url"],
@@ -77,15 +78,21 @@ class WorkspaceManager:
             )
             remote = result.stdout.strip()
             if remote:
-                if remote.startswith("git@"):
-                    remote = remote.split(":", 1)[1]
-                else:
-                    remote = urlparse(remote).path.lstrip("/")
-                repo_name = Path(remote).name.removesuffix(".git")
-                if repo_name:
-                    return repo_name
+                return remote
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
+        return None
+
+    def _discover_project_name(self) -> str:
+        remote = self.source_remote_url
+        if remote:
+            if remote.startswith("git@"):
+                remote = remote.split(":", 1)[1]
+            else:
+                remote = urlparse(remote).path.lstrip("/")
+            repo_name = Path(remote).name.removesuffix(".git")
+            if repo_name:
+                return repo_name
         return self.source_repo_root.name
 
     async def _clone_workspace(self, path: Path) -> None:
@@ -94,6 +101,12 @@ class WorkspaceManager:
             cwd=self.source_repo_root.parent,
             timeout_ms=self.config.workspace.hooks.timeout_ms,
         )
+        if self.source_remote_url:
+            await self._run_command(
+                ["git", "remote", "set-url", "origin", self.source_remote_url],
+                cwd=path,
+                timeout_ms=self.config.workspace.hooks.timeout_ms,
+            )
 
     async def publish_changes(self, workspace: WorkspaceHandle) -> PublishResult:
         branch = workspace.branch or f"codex/{_slugify(workspace.issue.identifier)}"

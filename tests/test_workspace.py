@@ -39,12 +39,17 @@ class FakeWorkspaceManager(WorkspaceManager):
         self.project_name = "maestro"
         self.root = self.config.workspace.root.expanduser().resolve() / self.project_name
         self.command_results: dict[tuple[str, ...], str] = {}
+        self.source_remote_url = "git@github.com:manojbajaj95/maestro.git"
 
     async def _clone_workspace(self, path: Path) -> None:
         self.calls.append(("clone", "", str(path)))
         path.mkdir(parents=True, exist_ok=True)
         (path / ".git").mkdir()
         (path / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
+        if self.source_remote_url:
+            self.calls.append(
+                ("cmd", f"git remote set-url origin {self.source_remote_url}", str(path))
+            )
 
     async def _checkout_issue_branch(self, path: Path, issue: Issue) -> str:
         self.calls.append(("branch", issue.identifier, str(path)))
@@ -81,7 +86,11 @@ async def test_workspace_prepare_clones_repo_and_runs_setup(tmp_path: Path) -> N
 
     assert handle.created is True
     assert handle.path == tmp_path / "symphony-home" / "maestro" / "abc-1"
-    assert [call[0] for call in manager.calls] == ["clone", "branch", "uv-sync"]
+    assert [call[0] for call in manager.calls] == ["clone", "cmd", "branch", "uv-sync"]
+    assert (
+        "git remote set-url origin git@github.com:manojbajaj95/maestro.git"
+        in [call[1] for call in manager.calls]
+    )
 
 
 @pytest.mark.asyncio
