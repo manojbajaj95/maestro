@@ -1,6 +1,6 @@
 # Agent Instructions
 
-This repository implements Symphony as a Python 3.13 `uv`-managed orchestration tool.
+This repository implements Symphony as a Python 3.14 `uv`-managed orchestration tool.
 
 ## Working Norms
 
