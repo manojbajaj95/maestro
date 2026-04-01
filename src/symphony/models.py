@@ -184,6 +184,7 @@ class WorkspaceHandle:
     issue: Issue
     path: Path
     created: bool
+    branch: str | None = None
 
 
 @dataclass(slots=True)
@@ -194,3 +195,11 @@ class SessionResult:
     rate_limits: RateLimitSnapshot = field(default_factory=RateLimitSnapshot)
     normal_exit: bool = True
     error: str | None = None
+
+
+@dataclass(slots=True)
+class PublishResult:
+    branch: str
+    commit_sha: str | None = None
+    pr_url: str | None = None
+    changed: bool = False

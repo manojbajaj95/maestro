@@ -24,4 +24,7 @@ Issue details:
 Repository conventions:
 - Follow AGENTS.md
 - Keep changes focused to the issue
-- Run relevant checks before finishing
+- Run only lightweight issue-appropriate checks before finishing
+- Prefer `uv run ruff check .` for small changes
+- Run broader validation only when the change requires it
+- Do not run `pre-commit run --all-files` unless explicitly needed
