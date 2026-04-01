@@ -1,13 +1,13 @@
 # Symphony
 
-Symphony is a Python 3.13 orchestration service for polling Linear or GitHub issues, creating per-issue workspaces, running Codex in app-server mode, and exposing lightweight runtime observability.
+Symphony is a Python 3.13 orchestration service for polling Linear or GitHub issues, cloning the repository into per-issue workspaces, running Codex in app-server mode, and exposing lightweight runtime observability.
 
 ## What It Does
 
 Symphony runs as a local orchestrator for a repository:
 
 - polls issues from Linear or GitHub
-- creates a dedicated workspace per issue
+- clones a dedicated workspace per issue
 - renders a prompt from `WORKFLOW.md`
 - starts Codex in app-server mode inside that workspace
 - retries or reconciles runs as issue state changes
@@ -74,7 +74,7 @@ tracker:
     - Done
     - Canceled
 workspace:
-  root: ~/tmp/symphony-workspaces
+  root: ~/symphony
 polling:
   interval_ms: 30000
 agent:
@@ -100,7 +100,7 @@ tracker:
   exclude_labels: [blocked]
   assignee: "@me"
 workspace:
-  root: ~/tmp/symphony-workspaces
+  root: ~/symphony
 polling:
   interval_ms: 30000
 agent:
@@ -180,12 +180,16 @@ The dashboard is intentionally simple and server-rendered.
 
 ## Workspace Behavior
 
-Each issue gets its own deterministic workspace directory under `workspace.root`.
+Each issue gets its own deterministic workspace directory under:
+
+`~/symphony/<project-name>/<issue>`
 
 Symphony will:
 
-- create the directory if it does not exist
-- reuse it if it already exists
+- clone the repository into the issue directory if it does not exist
+- switch to an issue branch before Codex starts
+- run `uv sync --group dev` before work in Python projects
+- reuse the existing clone if it already exists
 - run configured hooks
 - clean up terminal issue workspaces
 

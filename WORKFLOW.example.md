@@ -10,7 +10,7 @@ tracker:
     - Done
     - Canceled
 workspace:
-  root: ~/tmp/symphony-workspaces
+  root: ~/symphony
 polling:
   interval_ms: 30000
 agent:
@@ -39,7 +39,7 @@ tracker:
   exclude_labels: [blocked]
   assignee: "@me"
 workspace:
-  root: ~/tmp/symphony-workspaces
+  root: ~/symphony
 polling:
   interval_ms: 30000
 agent:

@@ -5,7 +5,7 @@ tracker:
   exclude_labels: [blocked]
   assignee: "@me"
 workspace:
-  root: ./.symphony-workspaces
+  root: ~/symphony
 polling:
   interval_ms: 30000
 agent:
