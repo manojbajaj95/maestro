@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from symphony.models import Issue, IssueStateRef, ServiceConfig, WorkspaceHandle
+from symphony.models import HookWarnings, Issue, IssueStateRef, ServiceConfig, WorkspaceHandle
 from symphony.workspace import WorkspaceManager
 
 
@@ -45,7 +45,6 @@ class FakeWorkspaceManager(WorkspaceManager):
         self.calls.append(("clone", "", str(path)))
         path.mkdir(parents=True, exist_ok=True)
         (path / ".git").mkdir()
-        (path / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
         if self.source_remote_url:
             self.calls.append(
                 ("cmd", f"git remote set-url origin {self.source_remote_url}", str(path))
@@ -56,7 +55,13 @@ class FakeWorkspaceManager(WorkspaceManager):
         return f"codex/{issue.identifier.lower()}"
 
     async def _setup_workspace(self, path: Path) -> None:
-        self.calls.append(("uv-sync", "", str(path)))
+        self.calls.append(("setup", "", str(path)))
+
+    async def _run_shell_command(
+        self, command: str, cwd: Path, *, fatal: bool, label: str
+    ) -> str | None:
+        self.calls.append(("shell", f"{label}:{command}", str(cwd)))
+        return None
 
     async def _run_command(
         self, args: list[str], cwd: Path, timeout_ms: int, *, fatal: bool = True
@@ -86,7 +91,7 @@ async def test_workspace_prepare_clones_repo_and_runs_setup(tmp_path: Path) -> N
 
     assert handle.created is True
     assert handle.path == tmp_path / "symphony-home" / "maestro" / "abc-1"
-    assert [call[0] for call in manager.calls] == ["clone", "cmd", "branch", "uv-sync"]
+    assert [call[0] for call in manager.calls] == ["clone", "cmd", "branch", "setup"]
     assert "git remote set-url origin git@github.com:manojbajaj95/maestro.git" in [
         call[1] for call in manager.calls
     ]
@@ -103,12 +108,10 @@ async def test_workspace_prepare_reuses_existing_clone(tmp_path: Path) -> None:
     existing = tmp_path / "symphony-home" / "maestro" / "abc-1"
     existing.mkdir(parents=True)
     (existing / ".git").mkdir()
-    (existing / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
-
     handle = await manager.prepare(make_issue())
 
     assert handle.created is False
-    assert [call[0] for call in manager.calls] == ["branch", "uv-sync"]
+    assert [call[0] for call in manager.calls] == ["branch", "setup"]
 
 
 @pytest.mark.asyncio
@@ -184,3 +187,49 @@ async def test_publish_changes_commits_pushes_and_creates_pr(tmp_path: Path) -> 
         cmd.startswith("gh pr create --head codex/abc-1 --base main --title Test")
         for cmd in commands
     )
+
+
+@pytest.mark.asyncio
+async def test_before_run_executes_prepare_commands(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.workspace.prepare = ["uv sync --group dev", "npm install"]
+    manager = FakeWorkspaceManager(config)
+    handle = WorkspaceHandle(
+        issue=make_issue(),
+        path=tmp_path / "symphony-home" / "maestro" / "abc-1",
+        created=False,
+        branch="codex/abc-1",
+    )
+    handle.path.mkdir(parents=True)
+
+    await manager.before_run(handle)
+
+    assert ("shell", "prepare:uv sync --group dev", str(handle.path)) in manager.calls
+    assert ("shell", "prepare:npm install", str(handle.path)) in manager.calls
+
+
+@pytest.mark.asyncio
+async def test_after_run_returns_post_warnings(tmp_path: Path) -> None:
+    class WarningWorkspaceManager(FakeWorkspaceManager):
+        async def _run_shell_command(
+            self, command: str, cwd: Path, *, fatal: bool, label: str
+        ) -> str | None:
+            self.calls.append(("shell", f"{label}:{command}", str(cwd)))
+            if label == "post":
+                return f"{label}_failed:{command}"
+            return None
+
+    config = make_config(tmp_path)
+    config.workspace.post = ["rm -rf .cache/tmp-artifacts"]
+    manager = WarningWorkspaceManager(config)
+    handle = WorkspaceHandle(
+        issue=make_issue(),
+        path=tmp_path / "symphony-home" / "maestro" / "abc-1",
+        created=False,
+        branch="codex/abc-1",
+    )
+    handle.path.mkdir(parents=True)
+
+    warnings = await manager.after_run(handle)
+
+    assert warnings == HookWarnings(warnings=["post_failed:rm -rf .cache/tmp-artifacts"])

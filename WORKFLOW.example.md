@@ -11,6 +11,7 @@ tracker:
     blocked: Blocked
 workspace:
   root: ~/symphony
+  prepare: uv sync --group dev
 polling:
   interval_ms: 30000
 agent:
@@ -43,6 +44,7 @@ tracker:
     blocked: status:blocked
 workspace:
   root: ~/symphony
+  prepare: uv sync --group dev
 polling:
   interval_ms: 30000
 agent:

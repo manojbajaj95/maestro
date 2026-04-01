@@ -1,4 +1,4 @@
-"""Workspace management and hooks."""
+"""Workspace management and lifecycle commands."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .errors import WorkspaceError
-from .models import Issue, PublishResult, ServiceConfig, WorkspaceHandle
+from .models import HookWarnings, Issue, PublishResult, ServiceConfig, WorkspaceHandle
 
 
 TRANSIENT_DIRS = ("tmp", ".elixir_ls")
@@ -49,7 +49,12 @@ class WorkspaceManager:
         branch = await self._checkout_issue_branch(path, issue)
         await self._setup_workspace(path)
         if created:
-            await self._run_hook(self.config.workspace.hooks.after_create, path, fatal=True)
+            await self._run_hook(
+                self.config.workspace.hooks.after_create,
+                path,
+                fatal=True,
+                label="after_create",
+            )
         for name in TRANSIENT_DIRS:
             target = path / name
             if target.exists():
@@ -57,13 +62,43 @@ class WorkspaceManager:
         return WorkspaceHandle(issue=issue, path=path, created=created, branch=branch)
 
     async def before_run(self, workspace: WorkspaceHandle) -> None:
-        await self._run_hook(self.config.workspace.hooks.before_run, workspace.path, fatal=True)
+        await self._run_commands(
+            self.config.workspace.prepare,
+            workspace.path,
+            fatal=True,
+            label="prepare",
+        )
+        await self._run_hook(
+            self.config.workspace.hooks.before_run,
+            workspace.path,
+            fatal=True,
+            label="before_run",
+        )
 
-    async def after_run(self, workspace: WorkspaceHandle) -> None:
-        await self._run_hook(self.config.workspace.hooks.after_run, workspace.path, fatal=False)
+    async def after_run(self, workspace: WorkspaceHandle) -> HookWarnings:
+        warnings = await self._run_commands(
+            self.config.workspace.post,
+            workspace.path,
+            fatal=False,
+            label="post",
+        )
+        warnings.extend(
+            await self._run_hook(
+                self.config.workspace.hooks.after_run,
+                workspace.path,
+                fatal=False,
+                label="after_run",
+            )
+        )
+        return HookWarnings(warnings=warnings)
 
     async def cleanup(self, workspace: WorkspaceHandle) -> None:
-        await self._run_hook(self.config.workspace.hooks.before_remove, workspace.path, fatal=False)
+        await self._run_hook(
+            self.config.workspace.hooks.before_remove,
+            workspace.path,
+            fatal=False,
+            label="before_remove",
+        )
         if workspace.path.exists():
             shutil.rmtree(workspace.path, ignore_errors=True)
 
@@ -159,30 +194,67 @@ class WorkspaceManager:
         return branch
 
     async def _setup_workspace(self, path: Path) -> None:
-        if not (path / "pyproject.toml").exists():
-            return
-        await self._run_command(
-            ["uv", "sync", "--group", "dev"],
-            cwd=path,
-            timeout_ms=self.config.workspace.hooks.timeout_ms * 4,
-        )
+        return
 
-    async def _run_hook(self, hook: str | None, cwd: Path, fatal: bool) -> None:
+    async def _run_commands(
+        self,
+        commands: list[str],
+        cwd: Path,
+        *,
+        fatal: bool,
+        label: str,
+    ) -> list[str]:
+        warnings: list[str] = []
+        for command in commands:
+            warning = await self._run_shell_command(command, cwd, fatal=fatal, label=label)
+            if warning:
+                warnings.append(warning)
+        return warnings
+
+    async def _run_hook(
+        self,
+        hook: str | None,
+        cwd: Path,
+        fatal: bool,
+        *,
+        label: str,
+    ) -> list[str]:
         if not hook:
-            return
-        proc = await asyncio.create_subprocess_shell(hook, cwd=str(cwd))
+            return []
+        warning = await self._run_shell_command(hook, cwd, fatal=fatal, label=label)
+        return [warning] if warning else []
+
+    async def _run_shell_command(
+        self,
+        command: str,
+        cwd: Path,
+        *,
+        fatal: bool,
+        label: str,
+    ) -> str | None:
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
         try:
-            await asyncio.wait_for(
-                proc.wait(), timeout=self.config.workspace.hooks.timeout_ms / 1000
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=self.config.workspace.hooks.timeout_ms / 1000,
             )
         except asyncio.TimeoutError as exc:
             proc.kill()
-            await proc.wait()
+            await proc.communicate()
             if fatal:
-                raise WorkspaceError("workspace_hook_timeout") from exc
-            return
-        if proc.returncode != 0 and fatal:
-            raise WorkspaceError(f"workspace_hook_failed:{proc.returncode}")
+                raise WorkspaceError(f"workspace_{label}_timeout") from exc
+            return f"{label}_timeout:{command}"
+        if proc.returncode != 0:
+            message = stderr.decode().strip() or stdout.decode().strip() or str(proc.returncode)
+            if fatal:
+                raise WorkspaceError(f"workspace_{label}_failed:{message}")
+            return f"{label}_failed:{message}"
+        return None
 
     async def _has_changes(self, cwd: Path) -> bool:
         status = await self._run_command_output(

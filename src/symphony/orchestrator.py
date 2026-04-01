@@ -143,6 +143,16 @@ class SymphonyOrchestrator:
                 issue, attempt, tool_handler=self._handle_tool_call
             )
             self._apply_usage(outcome.result.usage, outcome.result.rate_limits.model_dump())
+            for warning in outcome.warnings or []:
+                message = f"{issue.identifier}:{warning}"
+                self.state.errors.append(message)
+                log_event(
+                    self.logger,
+                    "worker_post_warning",
+                    issue_id=issue.id,
+                    issue_identifier=issue.identifier,
+                    warning=warning,
+                )
             review_issue = await self.tracker.move_to_in_review(outcome.issue)
         except (AppServerError, TrackerError, Exception) as exc:
             await self._move_issue_back_to_to_do(issue, error=str(exc))

@@ -89,8 +89,9 @@ class FakeWorkspaceManager:
 
 
 class FakeRunner:
-    def __init__(self, should_fail: bool = True) -> None:
+    def __init__(self, should_fail: bool = True, warnings: list[str] | None = None) -> None:
         self.should_fail = should_fail
+        self.warnings = warnings or []
 
     async def run_issue(self, issue: Issue, attempt: int, tool_handler=None):
         if self.should_fail:
@@ -104,6 +105,7 @@ class FakeRunner:
                 usage=UsageTotals(total_tokens=1),
                 rate_limits=RateLimitSnapshot(),
             ),
+            warnings=self.warnings,
         )
 
 
@@ -223,3 +225,19 @@ def test_worker_failure_moves_issue_back_to_to_do(tmp_path: Path) -> None:
     asyncio.run(orchestrator._run_worker(issue, attempt=1))
 
     assert tracker.transitions[-1] == ("1", "to_do")
+
+
+def test_worker_post_warnings_are_added_to_runtime_state(tmp_path: Path) -> None:
+    issue = make_issue("1", "ABC-1", priority=1, created_at=datetime.now(timezone.utc))
+    tracker = FakeTracker([issue])
+    orchestrator = SymphonyOrchestrator(
+        make_config(tmp_path),
+        cast(TrackerClient, tracker),
+        cast(WorkspaceController, FakeWorkspaceManager(tmp_path)),
+        cast(RunnerProtocol, FakeRunner(should_fail=False, warnings=["post_failed:cleanup"])),
+        logger=__import__("logging").getLogger("test"),
+    )
+
+    asyncio.run(orchestrator._run_worker(issue, attempt=1))
+
+    assert "ABC-1:post_failed:cleanup" in orchestrator.state.errors

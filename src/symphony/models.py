@@ -97,7 +97,26 @@ class WorkspaceHooks(BaseModel):
 
 class WorkspaceConfig(BaseModel):
     root: Path
+    prepare: list[str] = Field(default_factory=list)
+    post: list[str] = Field(default_factory=list)
     hooks: WorkspaceHooks = Field(default_factory=WorkspaceHooks)
+
+    @field_validator("prepare", "post", mode="before")
+    @classmethod
+    def normalize_commands(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            stripped = value.strip()
+            return [stripped] if stripped else []
+        if isinstance(value, list):
+            normalized: list[str] = []
+            for item in value:
+                stripped = str(item).strip()
+                if stripped:
+                    normalized.append(stripped)
+            return normalized
+        raise ValueError("workspace_commands_must_be_string_or_list")
 
 
 class AgentConfig(BaseModel):
@@ -214,3 +233,8 @@ class PublishResult:
     commit_sha: str | None = None
     pr_url: str | None = None
     changed: bool = False
+
+
+@dataclass(slots=True)
+class HookWarnings:
+    warnings: list[str] = field(default_factory=list)

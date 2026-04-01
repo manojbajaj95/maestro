@@ -97,3 +97,25 @@ Prompt
     assert config.tracker.kind == "github"
     assert config.tracker.states.to_do == "status:todo"
     assert config.tracker.states.done == "closed"
+
+
+def test_workspace_prepare_and_post_support_string_and_list_forms(tmp_path: Path) -> None:
+    workflow = tmp_path / "WORKFLOW.md"
+    workflow.write_text(
+        """---
+tracker:
+  kind: github
+  assignee: "@me"
+workspace:
+  root: /tmp/symphony
+  prepare: uv sync --group dev
+  post:
+    - rm -rf .cache/tmp-artifacts
+    - echo cleanup
+---
+Prompt
+"""
+    )
+    config = build_service_config(load_workflow(workflow))
+    assert config.workspace.prepare == ["uv sync --group dev"]
+    assert config.workspace.post == ["rm -rf .cache/tmp-artifacts", "echo cleanup"]

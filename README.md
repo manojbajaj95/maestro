@@ -103,6 +103,7 @@ tracker:
     blocked: status:blocked
 workspace:
   root: ~/symphony
+  prepare: uv sync --group dev
 codex:
   command: codex app-server
 server:
@@ -154,6 +155,7 @@ tracker:
     blocked: status:blocked
 workspace:
   root: ~/symphony
+  prepare: uv sync --group dev
 polling:
   interval_ms: 30000
 agent:
@@ -167,6 +169,7 @@ server:
 ```
 
 Choose the workspace root carefully. `workspace.root` is where Symphony creates per-issue clones such as `~/symphony/<repo>/<issue>`. Change it in `WORKFLOW.md` if you want those workspaces somewhere else.
+Use `workspace.prepare` for per-repo setup commands such as `uv sync --group dev` or `npm install`.
 
 ### 4. Running Symphony
 
@@ -232,6 +235,7 @@ tracker:
     blocked: Blocked
 workspace:
   root: ~/symphony
+  prepare: uv sync --group dev
 polling:
   interval_ms: 30000
 agent:
@@ -261,6 +265,7 @@ tracker:
     blocked: status:blocked
 workspace:
   root: ~/symphony
+  prepare: uv sync --group dev
 polling:
   interval_ms: 30000
 agent:
@@ -275,6 +280,40 @@ Work on issue {{ issue.identifier }}: {{ issue.title }}
 
 Issue details:
 {{ issue.description }}
+```
+
+### Workspace Lifecycle Commands
+
+Use `workspace.prepare` for repository-specific setup before Codex starts, and `workspace.post` for cleanup after the run finishes.
+
+- `workspace.prepare` runs after clone and branch checkout, on every attempt
+- `workspace.post` runs after the Codex attempt completes, on both success and failure
+- on successful runs, Symphony publishes changes before `workspace.post` runs
+- commit, push, and PR creation remain Symphony-managed and are not configurable workflow steps
+
+Each field accepts either a single shell command or a list of commands:
+
+```md
+workspace:
+  root: ~/symphony
+  prepare:
+    - uv sync --group dev
+  post:
+    - rm -rf .cache/tmp-artifacts
+```
+
+Examples:
+
+```md
+workspace:
+  root: ~/symphony
+  prepare: uv sync --group dev
+```
+
+```md
+workspace:
+  root: ~/symphony
+  prepare: npm install
 ```
 
 ### Prompt Variables
@@ -351,11 +390,11 @@ Symphony will:
 
 - clone the repository into the issue directory if it does not exist
 - switch to an issue branch before Codex starts
-- run `uv sync --group dev` before work in Python projects
+- run configured `workspace.prepare` commands before Codex starts
 - commit and push branch changes after a successful run
 - create or reuse a GitHub pull request for the issue branch
 - reuse the existing clone if it already exists
-- run configured hooks
+- run configured `workspace.post` commands after the run finishes
 - clean up terminal issue workspaces
 
 ## Quality Checks

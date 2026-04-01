@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .app_server import CodexAppServerClient
 from .errors import AppServerError, TrackerError
-from .models import Issue, PublishResult, ServiceConfig, SessionResult
+from .models import HookWarnings, Issue, PublishResult, ServiceConfig, SessionResult
 from .tracker import TrackerClient
 from .workflow import render_prompt
 
@@ -18,6 +19,7 @@ class WorkerOutcome:
     issue: Issue
     result: SessionResult
     publish: PublishResult | None = None
+    warnings: list[str] | None = None
 
 
 class WorkspaceController(Protocol):
@@ -25,7 +27,7 @@ class WorkspaceController(Protocol):
 
     async def before_run(self, workspace) -> None: ...
 
-    async def after_run(self, workspace) -> None: ...
+    async def after_run(self, workspace) -> HookWarnings: ...
 
     async def publish_changes(self, workspace) -> PublishResult: ...
 
@@ -51,6 +53,9 @@ class AgentRunner:
     ) -> WorkerOutcome:
         workspace = await self.workspace_manager.prepare(issue)
         await self.workspace_manager.before_run(workspace)
+        session = None
+        current = issue
+        post_warnings: list[str] = []
         try:
             prompt = render_prompt(
                 self.config.prompt_template, issue.model_dump(mode="json"), attempt
@@ -69,10 +74,24 @@ class AgentRunner:
             )
             refreshed = await self.tracker.fetch_issue_states_by_ids([issue.id])
             current = refreshed[0] if refreshed else issue
-            await session.stop()
-            await self.workspace_manager.after_run(workspace)
             publish = await self.workspace_manager.publish_changes(workspace)
-            return WorkerOutcome(normal_exit=True, issue=current, result=result, publish=publish)
-        except (AppServerError, TrackerError):
-            await self.workspace_manager.after_run(workspace)
+        except (AppServerError, TrackerError, Exception) as exc:
+            if session is not None:
+                with suppress(Exception):
+                    await session.stop()
+            post_result = await self.workspace_manager.after_run(workspace)
+            if post_result.warnings:
+                detail = "; ".join(post_result.warnings)
+                raise RuntimeError(f"{exc}; post_failed:{detail}") from exc
             raise
+        if session is not None:
+            with suppress(Exception):
+                await session.stop()
+        post_warnings = (await self.workspace_manager.after_run(workspace)).warnings
+        return WorkerOutcome(
+            normal_exit=True,
+            issue=current,
+            result=result,
+            publish=publish,
+            warnings=post_warnings,
+        )
